@@ -22,12 +22,57 @@ class SimpleGCN(torch.nn.Module):
 
         x = self.conv1(x, edge_index)
         x = torch.nn.functional.relu(x)
-        x = self.dropout(x)
+        # x = self.dropout(x)
         x = self.conv2(x, edge_index)
         x = torchg.nn.global_mean_pool(x, data.batch)
         x = self.mlp(x)
         return torch.nn.functional.sigmoid(x)
 
+class MPNNl(torchg.nn.MessagePassing):
+    def __init__(self, in_channels, out_channels):
+        super(MPNNl, self).__init__(aggr='mean')  
+        self.out_channels = out_channels
+        self.lin = torch.nn.Linear(in_channels, 4 * out_channels)
+        # self.mlpf = torch.nn.Sequential(
+        #     torch.nn.Linear(32, 32),
+        #     torch.nn.ReLU(),
+        #     torch.nn.Linear(32, 1)
+        # )
+
+    def forward(self, x, edge_index, edge_attr):
+        # x, edge_index = data.x, data.edge_index
+        x = self.lin(x)
+        x = torch.reshape(x, (-1, 4, self.out_channels))
+        rs = x[edge_index[0], edge_attr[:,0]]
+        return self.propagate(edge_index, rs=rs, n= x.shape[0])
+
+    def message(self, rs, n):
+        return rs
+        
+
+class MPNN(torch.nn.Module):
+    def __init__(self, featurenum):
+        super(MPNN, self).__init__()
+        self.conv1 = torchg.nn.GCNConv(featurenum, 32)
+        self.conv2 = torchg.nn.GCNConv(32, 32)
+        self.mpn = MPNNl(32, 32)
+        self.dropout = torch.nn.Dropout()
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(32, 32),
+            torch.nn.ReLU(),
+            torch.nn.Linear(32, 1)
+        )
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        x = self.conv1(x, edge_index)
+        x = torch.nn.functional.relu(x)
+        x = self.conv2(x, edge_index)
+        x = torch.nn.functional.relu(x)
+        x = self.mpn(x, edge_index, data.edge_attr)
+        x = torchg.nn.global_mean_pool(x, data.batch)
+        x = self.dropout(x)
+        x = self.mlp(x)
+        return torch.nn.functional.sigmoid(x)
 maxepoch = 40
 if __name__ == '__main__':
     device = torch.device('cuda:1')
@@ -41,7 +86,8 @@ if __name__ == '__main__':
         traindata = datap.snomaData(trfname, True)
         testdata = datap.snomaData(tefname, True)
         dataloader = DataLoader(traindata, batch_size= 32, shuffle = True)
-        simplegcn = SimpleGCN(40)
+        # simplegcn = SimpleGCN(40)
+        simplegcn = MPNN(40)
         optim = torch.optim.Adam(simplegcn.parameters(), lr=1e-3)
         lossl = []
         losstestl = []
@@ -80,10 +126,10 @@ if __name__ == '__main__':
                         p, r, thr = metrics.precision_recall_curve(tb.y, out)
                         prcauc = metrics.auc(r, p)
             
-        plott.plot(lossl, losstestl)
-        plott.plot(aucl)
+        # plott.plot(lossl, losstestl)
+        plott.plot(accl, [float(i) for i in aucl])
         print('ROC AUC:', rocauc, 'PRC AUC', prcauc)
         ROCs.append(rocauc)
         PRCs.append(prcauc)
         # plott.plot(accl)
-    print('final ROC AUC:', sum(rocauc) / len(rocauc), 'final PRC AUC:', sum(prcauc) / len(prcauc))
+    print('final ROC AUC:', sum(ROCs) / len(ROCs), 'final PRC AUC:', sum(PRCs) / len(PRCs))

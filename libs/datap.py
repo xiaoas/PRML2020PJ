@@ -15,15 +15,20 @@ def snomaData(fname, popposi = False):
             gf = pysmiles.read_smiles(row[0]) # 'CCCCCc1c2c(cc(O)c1C(=O)O)OC(=O)c1c(cc(OC)cc1C(=O)CCCC)O2'
             x = torch.empty((gf.number_of_nodes(), 40))
             edge_index = torch.empty((2, 2 * gf.number_of_edges()))
-            edge_attr = torch.empty((2 * gf.number_of_edges(), 1))
+            edge_attr = torch.empty((2 * gf.number_of_edges(), 1), dtype=torch.long)
             for idx in range(gf.number_of_nodes()):
                 x[idx] = torch.cat((torch.eye(32)[elemap[gf.nodes(data='element')[idx]]], torch.eye(8)[gf.nodes(data='hcount')[idx]]))
             for idx, edge in enumerate(gf.edges):
                 edge_index[:, idx * 2] = torch.tensor(edge)
                 edge_index[:, idx * 2 + 1] = torch.tensor(edge[::-1])
             for idx, edge in enumerate(gf.edges(data='order')):
-                edge_attr[idx * 2, 0] = edge[2]
-                edge_attr[idx * 2 + 1, 0] = edge[2]
+                edgt = edge[2] - 1
+                if edgt > 0:
+                    edgt += 0.5
+                if edgt > 0.5:
+                    edgt += 0.5
+                edge_attr[idx * 2, 0] = edgt
+                edge_attr[idx * 2 + 1, 0] = edgt
             datum = torch_geometric.data.Data(x= x, edge_index=edge_index.to(torch.long), edge_attr=edge_attr, y = torch.tensor([[int(row[1])]], dtype = torch.float))
             if datum.y == 1 and popposi:
                 datas += 24 * [datum]
